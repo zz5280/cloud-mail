@@ -6,10 +6,45 @@ import emailService from './service/email-service';
 import r2Service from './service/r2-service';
 import oauthService from './service/oauth-service';
 import analysisService from './service/analysis-service';
+function decodePathSafely(path) {
+  let current = path;
+  for (let i = 0; i < 3; i++) {
+    try {
+      const decoded = decodeURIComponent(current);
+      if (decoded === current) break;
+      current = decoded;
+    } catch {
+      break;
+    }
+  }
+  return current;
+}
+
+function isSensitivePath(rawPath) {
+  let path = rawPath.split('?')[0].split('#')[0];
+  path = decodePathSafely(path);
+  path = path.replace(/\\/g, '/').replace(/\/{2,}/g, '/').toLowerCase();
+  if (path === '/.well-known' || path.startsWith('/.well-known/')) return false;
+  const segments = path.split('/').filter(Boolean);
+  for (const seg of segments) {
+    if (seg === '.env' || seg.startsWith('.env.') || seg.startsWith('.env-')) return true;
+    if (seg === '.git' || seg.startsWith('.git')) return true;
+    if (seg === '.config' || seg.startsWith('.config')) return true;
+    if (seg === 'credentials' || seg.startsWith('credentials.') || seg.startsWith('credentials-')) return true;
+    if (seg === '.credentials' || seg.startsWith('.credentials')) return true;
+    if (seg === '.aws' || seg === '.ssh') return true;
+  }
+  return false;
+}
+
 export default {
-	 async fetch(req, env, ctx) {
+	async fetch(req, env, ctx) {
 
 		const url = new URL(req.url)
+
+		if (isSensitivePath(url.pathname) || isSensitivePath(req.url)) {
+			return new Response('Not Found', { status: 404, headers: { 'Cache-Control': 'no-store' } });
+		}
 
 		if (url.pathname.startsWith('/api/')) {
 			url.pathname = url.pathname.replace('/api', '')
@@ -23,10 +58,10 @@ export default {
 			return resp || new Response('Not Found', { status: 404 });
 		}
 
-		 if (['/static/','/attachments/'].some(p => url.pathname.startsWith(p))) {
-			 const resp = await r2Service.toObjResp({ env }, url.pathname.substring(1));
-			 return resp || new Response('Not Found', { status: 404 });
-		 }
+		if (['/static/', '/attachments/'].some(p => url.pathname.startsWith(p))) {
+			const resp = await r2Service.toObjResp({ env }, url.pathname.substring(1));
+			return resp || new Response('Not Found', { status: 404 });
+		}
 
 		return env.assets.fetch(req);
 	},
